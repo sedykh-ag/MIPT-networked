@@ -6,6 +6,13 @@
 #include <stdlib.h>
 #include <vector>
 #include <map>
+#include <chrono>
+#include <thread>
+
+void usleep(int us) // windows does not have usleep
+{
+  std::this_thread::sleep_for(std::chrono::microseconds(us));
+}
 
 static std::vector<Entity> entities;
 static std::map<uint16_t, ENetPeer*> controlledMap;
@@ -21,10 +28,10 @@ void on_join(ENetPacket *packet, ENetPeer *peer, ENetHost *host)
   for (const Entity &e : entities)
     maxEid = std::max(maxEid, e.eid);
   uint16_t newEid = maxEid + 1;
-  uint32_t color = 0xff000000 +
+  uint32_t color = 0x44000000 * (rand() % 5) +
                    0x00440000 * (rand() % 5) +
                    0x00004400 * (rand() % 5) +
-                   0x00000044 * (rand() % 5);
+                   0x000000FF;
   float x = (rand() % 4) * 5.f;
   float y = (rand() % 4) * 5.f;
   Entity ent = {color, x, y, 0.f, (rand() / RAND_MAX) * 3.141592654f, 0.f, 0.f, newEid};
@@ -117,7 +124,7 @@ int main(int argc, const char **argv)
         send_snapshot(peer, e.eid, e.x, e.y, e.ori);
       }
     }
-    usleep(100000);
+    usleep(100);
   }
 
   enet_host_destroy(server);
