@@ -1,4 +1,5 @@
 #include "protocol.h"
+#include "snapshot.h"
 #include <cstring> // memcpy
 
 void send_join(ENetPeer *peer)
@@ -45,18 +46,29 @@ void send_entity_input(ENetPeer *peer, uint16_t eid, float thr, float steer)
   enet_peer_send(peer, 1, packet);
 }
 
-void send_snapshot(ENetPeer *peer, uint16_t eid, float x, float y, float ori)
+void send_snapshot(ENetPeer *peer, uint32_t time, uint16_t eid, float x, float y, float ori)
 {
-  ENetPacket *packet = enet_packet_create(nullptr, sizeof(uint8_t) + sizeof(uint16_t) +
+  ENetPacket *packet = enet_packet_create(nullptr, sizeof(uint8_t) + sizeof(uint32_t) + sizeof(uint16_t) +
                                                    3 * sizeof(float),
                                                    ENET_PACKET_FLAG_UNSEQUENCED);
   uint8_t *ptr = packet->data;
   *ptr = E_SERVER_TO_CLIENT_SNAPSHOT; ptr += sizeof(uint8_t);
+  memcpy(ptr, &time, sizeof(uint32_t)); ptr += sizeof(uint32_t);
   memcpy(ptr, &eid, sizeof(uint16_t)); ptr += sizeof(uint16_t);
   memcpy(ptr, &x, sizeof(float)); ptr += sizeof(float);
   memcpy(ptr, &y, sizeof(float)); ptr += sizeof(float);
   memcpy(ptr, &ori, sizeof(float)); ptr += sizeof(float);
 
+  enet_peer_send(peer, 1, packet);
+}
+
+void send_snapshot(ENetPeer *peer, Snapshot snapshot)
+{
+  ENetPacket *packet = enet_packet_create(nullptr, sizeof(uint8_t) + sizeof(Snapshot),
+                                                   ENET_PACKET_FLAG_UNSEQUENCED);
+  uint8_t *ptr = packet->data;
+  *ptr = E_SERVER_TO_CLIENT_SNAPSHOT; ptr += sizeof(uint8_t);
+  memcpy(ptr, &snapshot, sizeof(Snapshot)); ptr += sizeof(Snapshot);
   enet_peer_send(peer, 1, packet);
 }
 
@@ -85,12 +97,18 @@ void deserialize_entity_input(ENetPacket *packet, uint16_t &eid, float &thr, flo
   steer = *(float*)(ptr); ptr += sizeof(float);
 }
 
-void deserialize_snapshot(ENetPacket *packet, uint16_t &eid, float &x, float &y, float &ori)
+void deserialize_snapshot(ENetPacket *packet, uint32_t &time, uint16_t &eid, float &x, float &y, float &ori)
 {
   uint8_t *ptr = packet->data; ptr += sizeof(uint8_t);
+  time = *(uint32_t*)(ptr); ptr += sizeof(uint32_t);
   eid = *(uint16_t*)(ptr); ptr += sizeof(uint16_t);
   x = *(float*)(ptr); ptr += sizeof(float);
   y = *(float*)(ptr); ptr += sizeof(float);
   ori = *(float*)(ptr); ptr += sizeof(float);
 }
 
+void deserialize_snapshot(ENetPacket *packet, Snapshot &snapshot)
+{
+  uint8_t *ptr = packet->data; ptr += sizeof(uint8_t);
+  snapshot = *(Snapshot*)(ptr); ptr += sizeof(Snapshot);
+}

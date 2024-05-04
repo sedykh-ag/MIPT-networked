@@ -8,6 +8,7 @@
 #include <map>
 #include <chrono>
 #include <thread>
+#include "snapshot.h"
 
 void usleep(int us) // windows does not have usleep
 {
@@ -83,9 +84,7 @@ int main(int argc, const char **argv)
   uint32_t lastTime = enet_time_get();
   while (true)
   {
-    uint32_t curTime = enet_time_get();
-    float dt = (curTime - lastTime) * 0.001f;
-    lastTime = curTime;
+    // std::cout << "time: " << enet_time_get() << '\n';
     ENetEvent event;
     while (enet_host_service(server, &event, 0) > 0)
     {
@@ -110,21 +109,36 @@ int main(int argc, const char **argv)
         break;
       };
     }
-    static int t = 0;
+
+    // update time
+    uint32_t curTime = enet_time_get();
+    float dt = (curTime - lastTime) * 0.001f;
+    lastTime = curTime;
+
+    // simulate
     for (Entity &e : entities)
     {
-      // simulate
       simulate_entity(e, dt);
-      // send
-      for (size_t i = 0; i < server->peerCount; ++i)
-      {
-        ENetPeer *peer = &server->peers[i];
-        // skip this here in this implementation
-        //if (controlledMap[e.eid] != peer)
-        send_snapshot(peer, e.eid, e.x, e.y, e.ori);
-      }
     }
-    usleep(100);
+    // prepare snapshot
+    Snapshot snapshot;
+    for (size_t i = 0; i < entities.size(); i++)
+    {
+      snapshot.eid[i] = entities[i].eid;
+      snapshot.x[i] = entities[i].x;
+      snapshot.y[i] = entities[i].y;
+      snapshot.ori[i] = entities[i].ori;
+    }
+    snapshot.time = enet_time_get();
+    // send snapshot to all clients
+    for (size_t i = 0; i < server->peerCount; ++i)
+    {
+      ENetPeer *peer = &server->peers[i];
+      // skip this here in this implementation
+      //if (controlledMap[e.eid] != peer)
+      send_snapshot(peer, snapshot);
+    }
+    usleep(100000);
   }
 
   enet_host_destroy(server);

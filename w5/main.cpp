@@ -6,18 +6,70 @@
 #include <math.h>
 
 #include <vector>
+#include <list>
+#include <iostream>
+#include <cassert>
 #include "entity.h"
 #include "protocol.h"
+#include "snapshot.h"
 
-
+static std::list<Snapshot> snapshots_buffer;
 static std::vector<Entity> entities;
 static uint16_t my_entity = invalid_entity;
+
+float lerp(float x, float y, float t)
+{
+  return (1 - t) * x + t * y;
+}
+
+Snapshot get_interpolated_snapshot(uint32_t curTime)
+{
+start:
+  Snapshot interpSnapshot;
+  for (auto &eid : interpSnapshot.eid)
+    eid = invalid_entity;
+
+  if (snapshots_buffer.size() < 2)
+    return interpSnapshot;
+
+  Snapshot from = *snapshots_buffer.begin();
+  Snapshot to = *std::next(snapshots_buffer.begin());
+  assert(from.time < to.time); 
+
+  if (from.time > curTime)
+  {
+    return interpSnapshot;
+  }
+
+  if (to.time < curTime)
+  {
+    snapshots_buffer.erase(snapshots_buffer.begin());
+    goto start; // lol
+  }
+
+  // from.time <= curTime <= to.time should guranteed at this point
+  assert(from.time <= curTime && curTime <= to.time);
+
+  float lerpValue = (float)(curTime - from.time) / (float)(to.time - from.time);
+  for (size_t i = 0; i < entities.size(); i++)
+  {
+    if (from.eid[i] != to.eid[i])
+    {
+      std::cout << "from.eid[i] != to.eid[i]\n";
+      continue;
+    }
+    interpSnapshot.eid[i] = to.eid[i];
+    interpSnapshot.x[i] = lerp(from.x[i], to.x[i], lerpValue);
+    interpSnapshot.y[i] = lerp(from.y[i], to.y[i], lerpValue);
+    interpSnapshot.ori[i] = lerp(from.ori[i], to.ori[i], lerpValue);
+  }
+  return interpSnapshot;
+}
 
 void on_new_entity_packet(ENetPacket *packet)
 {
   Entity newEntity;
   deserialize_new_entity(packet, newEntity);
-  // TODO: Direct adressing, of course!
   for (const Entity &e : entities)
     if (e.eid == newEntity.eid)
       return; // don't need to do anything, we already have entity
@@ -31,17 +83,10 @@ void on_set_controlled_entity(ENetPacket *packet)
 
 void on_snapshot(ENetPacket *packet)
 {
-  uint16_t eid = invalid_entity;
-  float x = 0.f; float y = 0.f; float ori = 0.f;
-  deserialize_snapshot(packet, eid, x, y, ori);
-  // TODO: Direct adressing, of course!
-  for (Entity &e : entities)
-    if (e.eid == eid)
-    {
-      e.x = x;
-      e.y = y;
-      e.ori = ori;
-    }
+  Snapshot snapshot;
+  deserialize_snapshot(packet, snapshot);
+  // std::cout << "received snapshot with time " << snapshot.time << '\n';  
+  snapshots_buffer.push_back(snapshot);
 }
 
 int main(int argc, const char **argv)
@@ -94,9 +139,10 @@ int main(int argc, const char **argv)
   SetTargetFPS(60);               // Set our game to run at 60 frames-per-second
 
   bool connected = false;
+  constexpr uint32_t offsetTime = 400; // [ms]
   while (!WindowShouldClose())
   {
-    float dt = GetFrameTime();
+    // std::cout << "time: " << enet_time_get() << '\n';
     ENetEvent event;
     while (enet_host_service(client, &event, 0) > 0)
     {
@@ -125,27 +171,44 @@ int main(int argc, const char **argv)
         break;
       };
     }
+
+    float dt = GetFrameTime();
+    uint32_t timeCurrentOffset = enet_time_get() - offsetTime;
+
+    Snapshot interpSnapshot = get_interpolated_snapshot(timeCurrentOffset);
+    for (size_t i = 0; i < entities.size(); i++)
+    {
+      for (Entity &e : entities)
+      {
+        if (e.eid == interpSnapshot.eid[i])
+        {
+          e.x = interpSnapshot.x[i];
+          e.y = interpSnapshot.y[i];
+          e.ori = interpSnapshot.ori[i];
+        }
+      }
+    }
+
     if (my_entity != invalid_entity)
     {
       bool left = IsKeyDown(KEY_LEFT);
       bool right = IsKeyDown(KEY_RIGHT);
       bool up = IsKeyDown(KEY_UP);
       bool down = IsKeyDown(KEY_DOWN);
-      // TODO: Direct adressing, of course!
-      for (Entity &e : entities)
-        if (e.eid == my_entity)
-        {
-          // Update
-          float thr = (up ? 1.f : 0.f) + (down ? -1.f : 0.f);
-          float steer = (left ? -1.f : 0.f) + (right ? 1.f : 0.f);
 
-          // Send
-          send_entity_input(serverPeer, my_entity, thr, steer);
-        }
+      // Update
+      float thr = (up ? 1.f : 0.f) + (down ? -1.f : 0.f);
+      float steer = (left ? -1.f : 0.f) + (right ? 1.f : 0.f);
+
+      // Send
+      send_entity_input(serverPeer, my_entity, thr, steer);
     }
 
     BeginDrawing();
       ClearBackground(GRAY);
+      DrawText(TextFormat("RTT to server: %d [ms]", serverPeer->roundTripTime), 10, 10, 20, BLACK);
+      DrawText(TextFormat("time offset: %d [ms]", offsetTime), 10, 40, 20, BLACK);
+      DrawText(TextFormat("current buffer size: %d", snapshots_buffer.size()), 10, 70, 20, BLACK);
       BeginMode2D(camera);
         for (const Entity &e : entities)
         {
