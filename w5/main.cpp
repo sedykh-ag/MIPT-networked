@@ -12,7 +12,10 @@
 #include "entity.h"
 #include "protocol.h"
 #include "snapshot.h"
+#include "constants.h"
 
+static std::vector<Entity> entity_state_history;
+static std::vector<InputState> input_state_history;
 static std::list<Snapshot> snapshots_buffer;
 static std::vector<Entity> entities;
 static uint16_t my_entity = invalid_entity;
@@ -55,7 +58,7 @@ start:
   {
     if (from.eid[i] != to.eid[i])
     {
-      std::cout << "from.eid[i] != to.eid[i]\n";
+      // std::cout << "from.eid[i] != to.eid[i]\n";
       continue;
     }
     interpSnapshot.eid[i] = to.eid[i];
@@ -71,7 +74,7 @@ Entity get_interpolated_entity(const Entity &from, const Entity& to, float alpha
   Entity interpEntity = { .eid = invalid_entity };
   if (from.eid != to.eid)
   {
-    std::cout << "from.eid != to.eid\n";
+    // std::cout << "from.eid != to.eid\n";
     return interpEntity;
   }
 
@@ -96,23 +99,64 @@ void on_new_entity_packet(ENetPacket *packet)
   entities.push_back(newEntity);
 }
 
-Entity on_set_controlled_entity(ENetPacket *packet)
+void on_set_controlled_entity(ENetPacket *packet, uint32_t tick)
 {
   deserialize_set_controlled_entity(packet, my_entity);
-  for (const auto& e: entities)
+  for (const Entity &e : entities)
+  {
     if (e.eid == my_entity)
-      return e;
-
-  std::cout << "ERROR on_set_controlled_entity\n";
-  return Entity{ .eid = invalid_entity }; // this should never happen
+    {
+      Entity ent = e;
+      ent.tick = tick;
+      // we need tick for physics resimulations
+      entity_state_history.push_back(ent);
+      input_state_history.push_back(InputState{});
+    }
+  }
+  std::cout << "received control over entity with eid: " << my_entity << '\n';
 }
 
 void on_snapshot(ENetPacket *packet)
 {
   Snapshot snapshot;
   deserialize_snapshot(packet, snapshot);
-  // std::cout << "received snapshot with time " << snapshot.time << '\n';  
   snapshots_buffer.push_back(snapshot);
+}
+
+void validate_physics()
+{
+  Snapshot snapshot = snapshots_buffer.back();
+
+  // compare server and client entities
+  assert (entity_state_history.size() == input_state_history.size());
+  Entity serverEntityState = get_entity_with_id(snapshot, my_entity);
+  assert(serverEntityState.eid == my_entity);
+  Entity clientEntityState;
+
+  size_t idx = -1;
+  for (size_t i = 0; i < entity_state_history.size(); i++)
+  {
+    if (entity_state_history[i].tick == snapshot.tick)
+    {
+      clientEntityState = entity_state_history[i];
+      idx = i;
+    }
+  }
+  serverEntityState.color = clientEntityState.color; // server snapshot does not store color
+  if (idx == -1) { return; } // this should not normally happen if the server is not ahead of the client
+  assert(clientEntityState.eid == my_entity);
+
+  // validation
+  if (entities_are_similar(serverEntityState, clientEntityState))
+    return;
+  
+  // physics resimulation
+  std::cout << "resimulating at tick " << clientEntityState.tick << '\n';
+  entity_state_history[idx] = serverEntityState;
+  for (size_t i = idx; i + 1 < input_state_history.size(); i++)
+  {
+    entity_state_history[i+1] = simulate_entity(entity_state_history[i], input_state_history[i], fixedDt, 0.0f);
+  }
 }
 
 int main(int argc, const char **argv)
@@ -165,16 +209,15 @@ int main(int argc, const char **argv)
   SetTargetFPS(60);               // Set our game to run at 60 frames-per-second
 
   bool connected = false;
-  constexpr uint32_t offsetTime = 400; // [ms]
-
-  constexpr float fixedDt = 0.1f; // [s]
   float accumulatorTime = 0.0f;
-  Entity prevEntityState = { .eid = my_entity };
-  Entity curEntityState = { .eid = my_entity };
+  uint32_t tick = 0;
 
   while (!WindowShouldClose())
   {
-    // std::cout << "time: " << enet_time_get() << '\n';
+    float curTime = enet_time_get() * 0.001f; // current time in seconds
+    uint32_t timeCurrentOffset = enet_time_get() - offsetTime;
+    tick = (uint32_t)ceil(curTime / fixedDt);
+
     ENetEvent event;
     while (enet_host_service(client, &event, 0) > 0)
     {
@@ -183,7 +226,6 @@ int main(int argc, const char **argv)
       case ENET_EVENT_TYPE_CONNECT:
         printf("Connection with %x:%u established\n", event.peer->address.host, event.peer->address.port);
         send_join(serverPeer);
-        connected = true;
         break;
       case ENET_EVENT_TYPE_RECEIVE:
         switch (get_packet_type(event.packet))
@@ -193,11 +235,11 @@ int main(int argc, const char **argv)
           break;
         case E_SERVER_TO_CLIENT_SET_CONTROLLED_ENTITY:
           // initialize controlled entity states
-          prevEntityState = on_set_controlled_entity(event.packet);
-          curEntityState = prevEntityState;          
+          on_set_controlled_entity(event.packet, tick);
           break;
         case E_SERVER_TO_CLIENT_SNAPSHOT:
           on_snapshot(event.packet);
+          connected = true;
           break;
         };
         break;
@@ -206,7 +248,8 @@ int main(int argc, const char **argv)
       };
     }
 
-    uint32_t timeCurrentOffset = enet_time_get() - offsetTime;
+    if (!connected) // don't do anything until connected
+      continue;
 
     Snapshot interpSnapshot = get_interpolated_snapshot(timeCurrentOffset);
     for (size_t i = 0; i < entities.size(); i++)
@@ -237,8 +280,6 @@ int main(int argc, const char **argv)
         .thr = (up ? 1.f : 0.f) + (down ? -1.f : 0.f),
         .steer = (left ? -1.f : 0.f) + (right ? 1.f : 0.f)
       };
-      // Send input state
-      send_input_state(serverPeer, inputState);
     }
 
     // local simulation of controlled entity
@@ -246,13 +287,38 @@ int main(int argc, const char **argv)
     accumulatorTime += frameTime;
     while (accumulatorTime >= fixedDt)
     {
-      prevEntityState = curEntityState;
-      simulate_entity(curEntityState, inputState, fixedDt);
+      // time and tick
       accumulatorTime -= fixedDt;
-    }
-    const float alpha = accumulatorTime / fixedDt;
-    Entity interpEntityState = get_interpolated_entity(prevEntityState, curEntityState, alpha);
+      // std::cout << "tick: " << tick << '\n';
 
+      // input state
+      inputState.tick = tick;
+      input_state_history.push_back(inputState);
+      send_input_state(serverPeer, inputState);
+
+      // simulation
+      Entity currentEntityState = simulate_entity(entity_state_history.back(), inputState, fixedDt, 0.0f);
+      // currentEntityState.tick = tick;
+      entity_state_history.push_back(currentEntityState);
+
+      // validation
+      validate_physics();
+
+      // buffers cleanup
+      if (entity_state_history.size() > 200)
+      {
+        entity_state_history.erase(entity_state_history.begin(), entity_state_history.begin() + 100);
+        input_state_history.erase(input_state_history.begin(), input_state_history.begin() + 100);
+      }
+    }
+    // interpolation of controlled entity BETWEEN TICKS
+    const float alpha = accumulatorTime / fixedDt;
+    Entity interpEntityState = { .eid = invalid_entity };
+    if (entity_state_history.size() > 1)
+    {
+      interpEntityState = get_interpolated_entity(
+        entity_state_history.end()[-2], entity_state_history.end()[-1], alpha);
+    }
     // replace entity in vector with the interpolated one
     for (auto &e: entities)
       if (e.eid == interpEntityState.eid)
@@ -263,7 +329,9 @@ int main(int argc, const char **argv)
       ClearBackground(GRAY);
       DrawText(TextFormat("RTT to server: %d [ms]", serverPeer->roundTripTime), 10, 10, 20, BLACK);
       DrawText(TextFormat("time offset: %d [ms]", offsetTime), 10, 40, 20, BLACK);
-      DrawText(TextFormat("current buffer size: %d", snapshots_buffer.size()), 10, 70, 20, BLACK);
+      DrawText(TextFormat("snapshots buffer size: %d", snapshots_buffer.size()), 10, 70, 20, BLACK);
+      DrawText(TextFormat("local inputs history size: %d", input_state_history.size()), 10, 100, 20, BLACK);
+      DrawText(TextFormat("local states history size: %d", entity_state_history.size()), 10, 130, 20, BLACK);
       BeginMode2D(camera);
         for (const Entity &e : entities)
         {

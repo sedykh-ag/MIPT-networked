@@ -17,7 +17,6 @@ void send_join(ENetPeer *peer);
 void send_new_entity(ENetPeer *peer, const Entity &ent);
 void send_set_controlled_entity(ENetPeer *peer, uint16_t eid);
 void send_input_state(ENetPeer *peer, InputState state);
-void send_snapshot(ENetPeer *peer, uint32_t time, uint16_t eid, float x, float y, float ori);
 void send_snapshot(ENetPeer *peer, Snapshot snapshot);
 
 MessageType get_packet_type(ENetPacket *packet);
@@ -25,5 +24,4 @@ MessageType get_packet_type(ENetPacket *packet);
 void deserialize_new_entity(ENetPacket *packet, Entity &ent);
 void deserialize_set_controlled_entity(ENetPacket *packet, uint16_t &eid);
 void deserialize_input_state(ENetPacket *packet, InputState &state);
-void deserialize_snapshot(ENetPacket *packet, uint32_t &time, uint16_t &eid, float &x, float &y, float &ori);
 void deserialize_snapshot(ENetPacket *packet, Snapshot& snapshot);

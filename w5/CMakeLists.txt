@@ -12,12 +12,14 @@ set(W5_SOURCES
     main.cpp
     protocol.cpp
     entity.cpp
+    snapshot.cpp
     )
 
 set(W5_SERVER_SOURCES
     server.cpp
     protocol.cpp
     entity.cpp
+    snapshot.cpp
     )
 
 

@@ -9,6 +9,7 @@
 #include <chrono>
 #include <thread>
 #include "snapshot.h"
+#include "constants.h"
 
 void usleep(int us) // windows does not have usleep
 {
@@ -36,7 +37,7 @@ void on_join(ENetPacket *packet, ENetPeer *peer, ENetHost *host)
                    0x000000FF;
   float x = (rand() % 4) * 5.f;
   float y = (rand() % 4) * 5.f;
-  Entity ent = {color, x, y, 0.f, (rand() / RAND_MAX) * 3.141592654f, newEid};
+  Entity ent = {0, color, x, y, 0.f, (rand() / RAND_MAX) * 3.141592654f, newEid};
   entities.push_back(ent);
   input_states.resize(entities.size());
 
@@ -86,12 +87,14 @@ int main(int argc, const char **argv)
     return 1;
   }
 
-  uint32_t lastTime = enet_time_get();
+  float lastTime = enet_time_get() * 0.001f; // [s]
   InputState state = { .eid = invalid_entity };
+  
+  float accumulatorTime = 0.0f; // [s]
+  uint32_t tick = 0;
 
   while (true)
   {
-    // std::cout << "time: " << enet_time_get() << '\n';
     ENetEvent event;
     while (enet_host_service(server, &event, 0) > 0)
     {
@@ -117,35 +120,47 @@ int main(int argc, const char **argv)
       };
     }
 
-    // update time
-    uint32_t curTime = enet_time_get();
-    float dt = (curTime - lastTime) * 0.001f;
+    // update dt
+    float curTime = enet_time_get() * 0.001f; // [s]
+    float dt = curTime - lastTime; // actual (not fixed) dt
     lastTime = curTime;
 
-    // simulate all entities
-    for (size_t i = 0; i < entities.size(); i++)
+    accumulatorTime += dt;
+    while (accumulatorTime >= fixedDt)
     {
-      simulate_entity(entities[i], input_states[i], dt);
+      // time and tick
+      accumulatorTime -= fixedDt;
+      tick = (uint32_t)ceil(curTime / fixedDt);
+      // std::cout << "tick: " << tick << '\n';
+
+      // simulate all entities
+      for (size_t i = 0; i < entities.size(); i++)
+      {
+        entities[i] = simulate_entity(entities[i], input_states[i], fixedDt, serverNoise);
+      }
+
+      // send snapshot to all clients
+      if (tick % snapshotsInterval != 0)
+        continue;
+      
+      Snapshot snapshot;
+      for (size_t i = 0; i < entities.size(); i++)
+      {
+        snapshot.eid[i] = entities[i].eid;
+        snapshot.x[i] = entities[i].x;
+        snapshot.y[i] = entities[i].y;
+        snapshot.speed[i] = entities[i].speed;
+        snapshot.ori[i] = entities[i].ori;
+      }
+      snapshot.time = enet_time_get();
+      snapshot.tick = tick;
+      for (size_t i = 0; i < server->peerCount; ++i)
+      {
+        ENetPeer *peer = &server->peers[i];
+        send_snapshot(peer, snapshot);
+      }
+      std::cout << "sent snapshot with tick " << snapshot.tick << '\n';
     }
-    // prepare snapshot
-    Snapshot snapshot;
-    for (size_t i = 0; i < entities.size(); i++)
-    {
-      snapshot.eid[i] = entities[i].eid;
-      snapshot.x[i] = entities[i].x;
-      snapshot.y[i] = entities[i].y;
-      snapshot.ori[i] = entities[i].ori;
-    }
-    snapshot.time = enet_time_get();
-    // send snapshot to all clients
-    for (size_t i = 0; i < server->peerCount; ++i)
-    {
-      ENetPeer *peer = &server->peers[i];
-      // skip this here in this implementation
-      //if (controlledMap[e.eid] != peer)
-      send_snapshot(peer, snapshot);
-    }
-    usleep(100000);
   }
 
   enet_host_destroy(server);

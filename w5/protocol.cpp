@@ -43,22 +43,6 @@ void send_input_state(ENetPeer *peer, InputState state)
   enet_peer_send(peer, 1, packet);
 }
 
-void send_snapshot(ENetPeer *peer, uint32_t time, uint16_t eid, float x, float y, float ori)
-{
-  ENetPacket *packet = enet_packet_create(nullptr, sizeof(uint8_t) + sizeof(uint32_t) + sizeof(uint16_t) +
-                                                   3 * sizeof(float),
-                                                   ENET_PACKET_FLAG_UNSEQUENCED);
-  uint8_t *ptr = packet->data;
-  *ptr = E_SERVER_TO_CLIENT_SNAPSHOT; ptr += sizeof(uint8_t);
-  memcpy(ptr, &time, sizeof(uint32_t)); ptr += sizeof(uint32_t);
-  memcpy(ptr, &eid, sizeof(uint16_t)); ptr += sizeof(uint16_t);
-  memcpy(ptr, &x, sizeof(float)); ptr += sizeof(float);
-  memcpy(ptr, &y, sizeof(float)); ptr += sizeof(float);
-  memcpy(ptr, &ori, sizeof(float)); ptr += sizeof(float);
-
-  enet_peer_send(peer, 1, packet);
-}
-
 void send_snapshot(ENetPeer *peer, Snapshot snapshot)
 {
   ENetPacket *packet = enet_packet_create(nullptr, sizeof(uint8_t) + sizeof(Snapshot),
@@ -90,16 +74,6 @@ void deserialize_input_state(ENetPacket *packet, InputState &state)
 {
   uint8_t *ptr = packet->data; ptr += sizeof(uint8_t);
   state = *(InputState*)(ptr); ptr += sizeof(InputState);
-}
-
-void deserialize_snapshot(ENetPacket *packet, uint32_t &time, uint16_t &eid, float &x, float &y, float &ori)
-{
-  uint8_t *ptr = packet->data; ptr += sizeof(uint8_t);
-  time = *(uint32_t*)(ptr); ptr += sizeof(uint32_t);
-  eid = *(uint16_t*)(ptr); ptr += sizeof(uint16_t);
-  x = *(float*)(ptr); ptr += sizeof(float);
-  y = *(float*)(ptr); ptr += sizeof(float);
-  ori = *(float*)(ptr); ptr += sizeof(float);
 }
 
 void deserialize_snapshot(ENetPacket *packet, Snapshot &snapshot)
