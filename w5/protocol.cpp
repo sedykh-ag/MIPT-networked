@@ -32,16 +32,13 @@ void send_set_controlled_entity(ENetPeer *peer, uint16_t eid)
   enet_peer_send(peer, 0, packet);
 }
 
-void send_entity_input(ENetPeer *peer, uint16_t eid, float thr, float steer)
+void send_input_state(ENetPeer *peer, InputState state)
 {
-  ENetPacket *packet = enet_packet_create(nullptr, sizeof(uint8_t) + sizeof(uint16_t) +
-                                                   2 * sizeof(float),
+  ENetPacket *packet = enet_packet_create(nullptr, sizeof(uint8_t) + sizeof(InputState),
                                                    ENET_PACKET_FLAG_UNSEQUENCED);
   uint8_t *ptr = packet->data;
   *ptr = E_CLIENT_TO_SERVER_INPUT; ptr += sizeof(uint8_t);
-  memcpy(ptr, &eid, sizeof(uint16_t)); ptr += sizeof(uint16_t);
-  memcpy(ptr, &thr, sizeof(float)); ptr += sizeof(float);
-  memcpy(ptr, &steer, sizeof(float)); ptr += sizeof(float);
+  memcpy(ptr, &state, sizeof(InputState)); ptr += sizeof(InputState);
 
   enet_peer_send(peer, 1, packet);
 }
@@ -89,12 +86,10 @@ void deserialize_set_controlled_entity(ENetPacket *packet, uint16_t &eid)
   eid = *(uint16_t*)(ptr); ptr += sizeof(uint16_t);
 }
 
-void deserialize_entity_input(ENetPacket *packet, uint16_t &eid, float &thr, float &steer)
+void deserialize_input_state(ENetPacket *packet, InputState &state)
 {
   uint8_t *ptr = packet->data; ptr += sizeof(uint8_t);
-  eid = *(uint16_t*)(ptr); ptr += sizeof(uint16_t);
-  thr = *(float*)(ptr); ptr += sizeof(float);
-  steer = *(float*)(ptr); ptr += sizeof(float);
+  state = *(InputState*)(ptr); ptr += sizeof(InputState);
 }
 
 void deserialize_snapshot(ENetPacket *packet, uint32_t &time, uint16_t &eid, float &x, float &y, float &ori)

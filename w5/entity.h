@@ -10,11 +10,14 @@ struct Entity
   float speed = 0.f;
   float ori = 0.f;
 
-  float thr = 0.f;
-  float steer = 0.f;
-
   uint16_t eid = invalid_entity;
 };
 
-void simulate_entity(Entity &e, float dt);
+struct InputState
+{
+  uint16_t eid = invalid_entity;
+  float thr = 0.f;
+  float steer = 0.f;
+};
 
+void simulate_entity(Entity &e, InputState &state, float dt);

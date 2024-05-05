@@ -66,6 +66,26 @@ start:
   return interpSnapshot;
 }
 
+Entity get_interpolated_entity(const Entity &from, const Entity& to, float alpha)
+{
+  Entity interpEntity = { .eid = invalid_entity };
+  if (from.eid != to.eid)
+  {
+    std::cout << "from.eid != to.eid\n";
+    return interpEntity;
+  }
+
+  interpEntity = {
+    .color = to.color,
+    .x = lerp(from.x, to.x, alpha),
+    .y = lerp(from.y, to.y, alpha),
+    .speed = lerp(from.speed, to.speed, alpha), // this isn't actually needed
+    .ori = lerp(from.ori, to.ori, alpha),
+    .eid = to.eid,
+  };
+  return interpEntity;
+}
+
 void on_new_entity_packet(ENetPacket *packet)
 {
   Entity newEntity;
@@ -76,9 +96,15 @@ void on_new_entity_packet(ENetPacket *packet)
   entities.push_back(newEntity);
 }
 
-void on_set_controlled_entity(ENetPacket *packet)
+Entity on_set_controlled_entity(ENetPacket *packet)
 {
   deserialize_set_controlled_entity(packet, my_entity);
+  for (const auto& e: entities)
+    if (e.eid == my_entity)
+      return e;
+
+  std::cout << "ERROR on_set_controlled_entity\n";
+  return Entity{ .eid = invalid_entity }; // this should never happen
 }
 
 void on_snapshot(ENetPacket *packet)
@@ -140,6 +166,12 @@ int main(int argc, const char **argv)
 
   bool connected = false;
   constexpr uint32_t offsetTime = 400; // [ms]
+
+  constexpr float fixedDt = 0.1f; // [s]
+  float accumulatorTime = 0.0f;
+  Entity prevEntityState = { .eid = my_entity };
+  Entity curEntityState = { .eid = my_entity };
+
   while (!WindowShouldClose())
   {
     // std::cout << "time: " << enet_time_get() << '\n';
@@ -160,7 +192,9 @@ int main(int argc, const char **argv)
           on_new_entity_packet(event.packet);
           break;
         case E_SERVER_TO_CLIENT_SET_CONTROLLED_ENTITY:
-          on_set_controlled_entity(event.packet);
+          // initialize controlled entity states
+          prevEntityState = on_set_controlled_entity(event.packet);
+          curEntityState = prevEntityState;          
           break;
         case E_SERVER_TO_CLIENT_SNAPSHOT:
           on_snapshot(event.packet);
@@ -172,7 +206,6 @@ int main(int argc, const char **argv)
       };
     }
 
-    float dt = GetFrameTime();
     uint32_t timeCurrentOffset = enet_time_get() - offsetTime;
 
     Snapshot interpSnapshot = get_interpolated_snapshot(timeCurrentOffset);
@@ -189,6 +222,7 @@ int main(int argc, const char **argv)
       }
     }
 
+    InputState inputState = { .eid = my_entity };
     if (my_entity != invalid_entity)
     {
       bool left = IsKeyDown(KEY_LEFT);
@@ -196,14 +230,35 @@ int main(int argc, const char **argv)
       bool up = IsKeyDown(KEY_UP);
       bool down = IsKeyDown(KEY_DOWN);
 
-      // Update
-      float thr = (up ? 1.f : 0.f) + (down ? -1.f : 0.f);
-      float steer = (left ? -1.f : 0.f) + (right ? 1.f : 0.f);
-
-      // Send
-      send_entity_input(serverPeer, my_entity, thr, steer);
+      // Update input state
+      inputState = 
+      {
+        .eid = my_entity,
+        .thr = (up ? 1.f : 0.f) + (down ? -1.f : 0.f),
+        .steer = (left ? -1.f : 0.f) + (right ? 1.f : 0.f)
+      };
+      // Send input state
+      send_input_state(serverPeer, inputState);
     }
 
+    // local simulation of controlled entity
+    float frameTime = GetFrameTime();
+    accumulatorTime += frameTime;
+    while (accumulatorTime >= fixedDt)
+    {
+      prevEntityState = curEntityState;
+      simulate_entity(curEntityState, inputState, fixedDt);
+      accumulatorTime -= fixedDt;
+    }
+    const float alpha = accumulatorTime / fixedDt;
+    Entity interpEntityState = get_interpolated_entity(prevEntityState, curEntityState, alpha);
+
+    // replace entity in vector with the interpolated one
+    for (auto &e: entities)
+      if (e.eid == interpEntityState.eid)
+        e = interpEntityState;
+
+    // render
     BeginDrawing();
       ClearBackground(GRAY);
       DrawText(TextFormat("RTT to server: %d [ms]", serverPeer->roundTripTime), 10, 10, 20, BLACK);

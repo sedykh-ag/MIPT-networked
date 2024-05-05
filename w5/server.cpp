@@ -16,6 +16,7 @@ void usleep(int us) // windows does not have usleep
 }
 
 static std::vector<Entity> entities;
+static std::vector<InputState> input_states;
 static std::map<uint16_t, ENetPeer*> controlledMap;
 
 void on_join(ENetPacket *packet, ENetPeer *peer, ENetHost *host)
@@ -35,8 +36,9 @@ void on_join(ENetPacket *packet, ENetPeer *peer, ENetHost *host)
                    0x000000FF;
   float x = (rand() % 4) * 5.f;
   float y = (rand() % 4) * 5.f;
-  Entity ent = {color, x, y, 0.f, (rand() / RAND_MAX) * 3.141592654f, 0.f, 0.f, newEid};
+  Entity ent = {color, x, y, 0.f, (rand() / RAND_MAX) * 3.141592654f, newEid};
   entities.push_back(ent);
+  input_states.resize(entities.size());
 
   controlledMap[newEid] = peer;
 
@@ -50,15 +52,18 @@ void on_join(ENetPacket *packet, ENetPeer *peer, ENetHost *host)
 
 void on_input(ENetPacket *packet)
 {
-  uint16_t eid = invalid_entity;
-  float thr = 0.f; float steer = 0.f;
-  deserialize_entity_input(packet, eid, thr, steer);
-  for (Entity &e : entities)
-    if (e.eid == eid)
-    {
-      e.thr = thr;
-      e.steer = steer;
-    }
+  InputState state = {
+    .eid =  invalid_entity,
+    .thr = 0.f,
+    .steer = 0.f
+  };
+  deserialize_input_state(packet, state);
+  for (size_t i = 0; i < entities.size(); i++)
+  {
+    if (entities[i].eid == state.eid)
+      input_states[i] = state;
+  }
+  // std::cout << "received state eid: " << state.eid << '\n';
 }
 
 int main(int argc, const char **argv)
@@ -82,6 +87,8 @@ int main(int argc, const char **argv)
   }
 
   uint32_t lastTime = enet_time_get();
+  InputState state = { .eid = invalid_entity };
+
   while (true)
   {
     // std::cout << "time: " << enet_time_get() << '\n';
@@ -115,10 +122,10 @@ int main(int argc, const char **argv)
     float dt = (curTime - lastTime) * 0.001f;
     lastTime = curTime;
 
-    // simulate
-    for (Entity &e : entities)
+    // simulate all entities
+    for (size_t i = 0; i < entities.size(); i++)
     {
-      simulate_entity(e, dt);
+      simulate_entity(entities[i], input_states[i], dt);
     }
     // prepare snapshot
     Snapshot snapshot;
