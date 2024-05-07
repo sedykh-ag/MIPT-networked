@@ -8,7 +8,7 @@ Entity get_entity_with_id(const Snapshot &snapshot, uint16_t eid)
     if (snapshot.eid[i] == eid)
     {
       return Entity{
-        .tick = snapshot.tick,
+        .tick = snapshot.tick[i],
         .x = snapshot.x[i],
         .y = snapshot.y[i],
         .speed = snapshot.speed[i],

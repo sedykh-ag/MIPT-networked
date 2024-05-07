@@ -7,7 +7,7 @@
 struct Snapshot
 {
   uint32_t time;
-  uint32_t tick;
+  uint32_t tick[MAX_PLAYERS];
   uint16_t eid[MAX_PLAYERS];
   float x[MAX_PLAYERS];
   float y[MAX_PLAYERS];

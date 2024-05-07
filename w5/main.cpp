@@ -125,6 +125,9 @@ void on_snapshot(ENetPacket *packet)
 
 void validate_physics()
 {
+  if (snapshots_buffer.empty())
+    return;
+  
   Snapshot snapshot = snapshots_buffer.back();
 
   // compare server and client entities
@@ -136,7 +139,7 @@ void validate_physics()
   size_t idx = -1;
   for (size_t i = 0; i < entity_state_history.size(); i++)
   {
-    if (entity_state_history[i].tick == snapshot.tick)
+    if (entity_state_history[i].tick == serverEntityState.tick)
     {
       clientEntityState = entity_state_history[i];
       idx = i;
@@ -145,11 +148,15 @@ void validate_physics()
   serverEntityState.color = clientEntityState.color; // server snapshot does not store color
   if (idx == -1) { return; } // this should not normally happen if the server is not ahead of the client
   assert(clientEntityState.eid == my_entity);
+  assert(serverEntityState.tick == clientEntityState.tick);
 
   // validation
   if (entities_are_similar(serverEntityState, clientEntityState))
+  {
+    std::cout << "validation successful at tick " << serverEntityState.tick << '\n';
     return;
-  
+  }
+
   // physics resimulation
   std::cout << "resimulating at tick " << clientEntityState.tick << '\n';
   entity_state_history[idx] = serverEntityState;
@@ -236,10 +243,10 @@ int main(int argc, const char **argv)
         case E_SERVER_TO_CLIENT_SET_CONTROLLED_ENTITY:
           // initialize controlled entity states
           on_set_controlled_entity(event.packet, tick);
+          connected = true;
           break;
         case E_SERVER_TO_CLIENT_SNAPSHOT:
           on_snapshot(event.packet);
-          connected = true;
           break;
         };
         break;
@@ -295,10 +302,11 @@ int main(int argc, const char **argv)
       inputState.tick = tick;
       input_state_history.push_back(inputState);
       send_input_state(serverPeer, inputState);
+      // std::cout << "sent input with tick " << tick << '\n';
 
       // simulation
       Entity currentEntityState = simulate_entity(entity_state_history.back(), inputState, fixedDt, 0.0f);
-      // currentEntityState.tick = tick;
+      currentEntityState.tick = tick;
       entity_state_history.push_back(currentEntityState);
 
       // validation

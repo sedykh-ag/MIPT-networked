@@ -53,11 +53,7 @@ void on_join(ENetPacket *packet, ENetPeer *peer, ENetHost *host)
 
 void on_input(ENetPacket *packet)
 {
-  InputState state = {
-    .eid =  invalid_entity,
-    .thr = 0.f,
-    .steer = 0.f
-  };
+  InputState state{};
   deserialize_input_state(packet, state);
   for (size_t i = 0; i < entities.size(); i++)
   {
@@ -95,6 +91,12 @@ int main(int argc, const char **argv)
 
   while (true)
   {
+    // update time
+    float curTime = enet_time_get() * 0.001f; // [s]
+    float dt = curTime - lastTime; // actual (not fixed) dt
+    lastTime = curTime;
+    tick = (uint32_t)ceil(curTime / fixedDt);
+
     ENetEvent event;
     while (enet_host_service(server, &event, 0) > 0)
     {
@@ -120,30 +122,23 @@ int main(int argc, const char **argv)
       };
     }
 
-    // update dt
-    float curTime = enet_time_get() * 0.001f; // [s]
-    float dt = curTime - lastTime; // actual (not fixed) dt
-    lastTime = curTime;
-
     accumulatorTime += dt;
     while (accumulatorTime >= fixedDt)
     {
-      // time and tick
       accumulatorTime -= fixedDt;
-      tick = (uint32_t)ceil(curTime / fixedDt);
-      // std::cout << "tick: " << tick << '\n';
 
       // simulate all entities
       for (size_t i = 0; i < entities.size(); i++)
       {
         entities[i] = simulate_entity(entities[i], input_states[i], fixedDt, serverNoise);
+        entities[i].tick = input_states[i].tick;
       }
 
       // send snapshot to all clients
       if (tick % snapshotsInterval != 0)
         continue;
       
-      Snapshot snapshot;
+      Snapshot snapshot = { .tick = 0 };
       for (size_t i = 0; i < entities.size(); i++)
       {
         snapshot.eid[i] = entities[i].eid;
@@ -151,15 +146,14 @@ int main(int argc, const char **argv)
         snapshot.y[i] = entities[i].y;
         snapshot.speed[i] = entities[i].speed;
         snapshot.ori[i] = entities[i].ori;
+        snapshot.tick[i] = entities[i].tick; // CAUTION tick may be different for different entities!
       }
       snapshot.time = enet_time_get();
-      snapshot.tick = tick;
       for (size_t i = 0; i < server->peerCount; ++i)
       {
         ENetPeer *peer = &server->peers[i];
         send_snapshot(peer, snapshot);
       }
-      std::cout << "sent snapshot with tick " << snapshot.tick << '\n';
     }
   }
 

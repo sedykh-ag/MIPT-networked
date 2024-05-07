@@ -29,6 +29,6 @@ bool entities_are_similar(const Entity &serverEntity, const Entity& clientEntity
   assert(serverEntity.tick == clientEntity.tick);
   return std::abs(serverEntity.x - clientEntity.x) < X_TOL &&
          std::abs(serverEntity.y - clientEntity.y) < Y_TOL &&
-         std::abs(serverEntity.speed - clientEntity.speed) < SPEED_TOL &&
+         // std::abs(serverEntity.speed - clientEntity.speed) < SPEED_TOL &&
          std::abs(serverEntity.ori - clientEntity.ori) < ORI_TOL;
 }
